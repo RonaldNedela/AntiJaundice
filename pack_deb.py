@@ -7,7 +7,12 @@ from PIL import Image, ImageDraw
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 source_sb_m = os.path.join(script_dir, "src/AntiJaundice.m")
+if not os.path.exists(source_sb_m):
+    source_sb_m = os.path.join(script_dir, "AntiJaundice.m")
+
 source_pref_m = os.path.join(script_dir, "src/AntiJaundicePrefs.m")
+if not os.path.exists(source_pref_m):
+    source_pref_m = os.path.join(script_dir, "AntiJaundicePrefs.m")
 
 if not os.path.exists(source_sb_m):
     print(f"Error: SpringBoard source file not found at {source_sb_m}")
