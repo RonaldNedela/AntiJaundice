@@ -1099,25 +1099,6 @@ static void installScreenshotHooks(void) {
 
 
 
-static BOOL gDisplayBlanked = NO;
-static void onScreenBlankStateChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    (void)center; (void)observer; (void)object; (void)userInfo;
-    NSString *n = (__bridge NSString *)name;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([n isEqualToString:@"com.apple.springboard.hasBlankedScreen"]) {
-            gDisplayBlanked = YES;
-            if (gOverlayWindow) {
-                gOverlayWindow.hidden = YES;
-            }
-        } else {
-            gDisplayBlanked = NO;
-            if (gOverlayWindow) {
-                BOOL en = gOverlayVC && gOverlayVC.overlayView ? gOverlayVC.overlayView.isFilterEnabled : YES;
-                gOverlayWindow.hidden = !en;
-            }
-        }
-    });
-}
 
 static void initSpringBoard(void) {
     NSLog(@"[AntiJaundice] Initializing AntiJaundice tweak for SpringBoard...");
@@ -1161,22 +1142,14 @@ static void initSpringBoard(void) {
         onSceneActivated(note);
     }];
     
-    CFNotificationCenterAddObserver(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        NULL,
-        onScreenBlankStateChanged,
-        CFSTR("com.apple.springboard.hasBlankedScreen"),
-        NULL,
-        CFNotificationSuspensionBehaviorCoalesce
-    );
-    CFNotificationCenterAddObserver(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        NULL,
-        onScreenBlankStateChanged,
-        CFSTR("com.apple.springboard.screenIsAwake"),
-        NULL,
-        CFNotificationSuspensionBehaviorCoalesce
-    );
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        (void)note;
+        setupOverlayIfReady();
+        updateWindowFrames();
+    }];
 
     [[NSNotificationCenter defaultCenter] addObserverForName:UIDeviceOrientationDidChangeNotification
                                                       object:nil

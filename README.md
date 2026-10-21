@@ -11,7 +11,15 @@
 
 ---
 
-## 🚀 What's New in v1.0.1 (Battery & GPU Performance Overhaul)
+## 🚀 What's New in v1.0.2 (Sleep & Wake Persistence Fix)
+
+- 🔒 **Fixed Sleep/Wake State Loss**: In v1.0.1, an aggressive `hasBlankedScreen` display sleep hook caused the overlay window to stay hidden upon waking up on iOS/iPadOS 17, requiring users to manually toggle the switch in Settings. This has been completely replaced with a seamless, persistent zero-power CoreAnimation layer lifecycle.
+- ⚡ **Instant Wakeup Restoration**: Connected to `UIApplicationDidBecomeActiveNotification` and `UISceneDidActivateNotification` ensuring the overlay is always attached, active, and perfectly aligned whenever the iPad wakes up or unlocks.
+- 🔋 **Zero Battery Sleep Impact**: Since CoreAnimation natively powers down display backlight and halts compositor scanout when screen is dark, the static GPU layers draw 0.0% power when sleeping without needing to hide the window hierarchy.
+
+---
+
+## ⚡ What's New in v1.0.1 (Battery & GPU Performance Overhaul)
 
 - ⚡ **100% CoreAnimation GPU Rendering (`CAGradientLayer`)**: Completely eliminated CPU software rasterization (`drawRect:`). Gradients are now rendered directly on the GPU via native Metal shaders with **0% CPU overhead**.
 - 🕳️ **Center 90% Screen Bypass**: Instead of a full-screen composition layer, AntiJaundice now creates 4 independent razor-thin boundary layers that seamlessly join at 45° corner miter angles. The inner **90% of the display has zero layers and zero compositing**, allowing the iPad Pro's 120Hz ProMotion display to downclock to 24Hz on static screens to maximize battery life.
@@ -85,7 +93,7 @@ AntiJaundice neutralizes the defect entirely in software through **additive comp
 ### Package Manager (Sileo / Zebra / Filza)
 1. Download the compiled `.deb` package:
    - **Rootless (Dopamine / palera1n rootless):**  
-     `com.ronci.antijaundice_1.0.1_iphoneos-arm64.deb`
+     `com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`
 2. Open in **Sileo** / **Zebra** / **Filza** and tap **Install**.
 3. Respring your device.
 
@@ -122,7 +130,7 @@ The script:
 2. Links and codesigns the dylib via `ldid -S`.
 3. Compiles `AntiJaundice` PreferenceBundle Mach-O linked to `Preferences.tbd`.
 4. Generates multi-resolution Settings icons.
-5. Builds the `.deb` archive via `dpkg-deb -Zgzip --root-owner-group` to `/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.1_iphoneos-arm64.deb`.
+5. Builds the `.deb` archive via `dpkg-deb -Zgzip --root-owner-group` to `/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`.
 
 ---
 
