@@ -1,146 +1,155 @@
-# AntiJaundice 🩺
+# AntiJaundice
 
-**Optical Edge Yellowing ("Display Jaundice") Compensation Filter for iPad Displays**  
-*Targeted chromatic neutralization for degraded LOCA adhesive and polarizer aging on iPad Pro 10.5" (2017), iPad Pro 9.7", iPad Air 3, and all laminated iOS screens.*
+**Optical Edge Yellowing Compensation Filter for iPad Displays**  
+*Targeted chromatic neutralization for degraded LOCA adhesive and polarizer aging on iPad Pro 10.5" (2017), iPad Pro 9.7", iPad Air 3, and laminated iOS panels.*
 
 ![iOS 12.0 - 18+](https://img.shields.io/badge/iOS-12.0--18%2B-blue?style=flat-square)
 ![Architecture](https://img.shields.io/badge/Architecture-arm64%20%7C%20arm64e-success?style=flat-square)
 ![Jailbreak](https://img.shields.io/badge/Jailbreak-Rootless%20%26%20Rootful-orange?style=flat-square)
-![Battery](https://img.shields.io/badge/Battery-Ultra%20Low%20Power%20(GPU%20Native)-green?style=flat-square)
+![Power Consumption](https://img.shields.io/badge/Power-Zero%20Overhead%20(Metal%20Native)-green?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
 
 ---
 
-## 🚀 What's New in v1.0.2 (Sleep & Wake Persistence Fix)
+## Release Notes: Version 1.0.2
 
-- 🔒 **Fixed Sleep/Wake State Loss**: In v1.0.1, an aggressive `hasBlankedScreen` display sleep hook caused the overlay window to stay hidden upon waking up on iOS/iPadOS 17, requiring users to manually toggle the switch in Settings. This has been completely replaced with a seamless, persistent zero-power CoreAnimation layer lifecycle.
-- ⚡ **Instant Wakeup Restoration**: Connected to `UIApplicationDidBecomeActiveNotification` and `UISceneDidActivateNotification` ensuring the overlay is always attached, active, and perfectly aligned whenever the iPad wakes up or unlocks.
-- 🔋 **Zero Battery Sleep Impact**: Since CoreAnimation natively powers down display backlight and halts compositor scanout when screen is dark, the static GPU layers draw 0.0% power when sleeping without needing to hide the window hierarchy.
+### Regression Analysis and Resolution
+In version 1.0.1, an aggressive sleep-state hook was introduced to minimize standby battery draw. It subscribed to the Darwin notification `com.apple.springboard.hasBlankedScreen` and set `gOverlayWindow.hidden = YES` whenever the display powered down.
 
----
+#### Root Cause of Failure
+On iPadOS 17, the reciprocal wake event `com.apple.springboard.screenIsAwake` is deprecated and no longer broadcast reliably by `SpringBoard` upon user wake or biometric unlock. As a result:
+- The window remained in a hidden state (`hidden = YES`) after the screen turned back on.
+- The filter ceased displaying until the user navigated to Settings and manually toggled the master enable switch to force a preference reload (`com.ronci.antijaundice/prefsChanged`).
 
-## ⚡ What's New in v1.0.1 (Battery & GPU Performance Overhaul)
-
-- ⚡ **100% CoreAnimation GPU Rendering (`CAGradientLayer`)**: Completely eliminated CPU software rasterization (`drawRect:`). Gradients are now rendered directly on the GPU via native Metal shaders with **0% CPU overhead**.
-- 🕳️ **Center 90% Screen Bypass**: Instead of a full-screen composition layer, AntiJaundice now creates 4 independent razor-thin boundary layers that seamlessly join at 45° corner miter angles. The inner **90% of the display has zero layers and zero compositing**, allowing the iPad Pro's 120Hz ProMotion display to downclock to 24Hz on static screens to maximize battery life.
-- 🛑 **Automatic Screen-Off Power Cutoff (`hasBlankedScreen`)**: Detects when the iPad sleeps or locks and completely detaches the overlay window from the render tree, ensuring **0.0% battery drain while locked**.
-- 📉 **99.9% Memory Footprint Reduction**: RAM consumption dropped from ~30 MB (dual framebuffer bitmaps) down to **under 20 KB** of GPU vector state.
-- 🛡️ **Delta Caching**: State and frame updates are strictly gated; if bounds and sliders haven't changed, 0 instructions are executed.
+#### Architectural Fix
+- **Removal of Redundant State Toggling**: Because version 1.0.1 transitioned all rendering to static `CAGradientLayer` instances with zero timers and no active display links, iOS hardware automatically cuts backlight power and halts compositor scanout when the screen is dark. The overlay consumes 0.0% power during sleep without altering the window hierarchy.
+- **Lifecycle Integration**: Subscribed to `UIApplicationDidBecomeActiveNotification` and `UISceneDidActivateNotification`. When the iPad wakes or transitions past the lock screen, the overlay immediately verifies its active window scene and coordinate space bounds without ever dropping visibility.
 
 ---
 
-## 📌 Background: The "Yellow Border" Aging Defect
+## Release Notes: Version 1.0.1
 
-A widespread issue on older laminated iPad displays—most notoriously the **iPad Pro 10.5-inch (2017)**, **iPad Pro 9.7-inch (2016)**, and **iPad Air 3rd Gen**—is the progressive formation of an unsightly yellow, amber, or brownish border running around the perimeter of the screen. In enthusiast and repair communities, this is colloquially referred to as "display jaundice" or screen adhesive degradation (*"májbetegség"*).
-
-### Why Does It Happen?
-Laminated iPad panels bond the outer protective cover glass, digitizer, polarizing filter, and LCD TFT substrate using Liquid Optical Clear Adhesive (LOCA/OCA). Over years of use:
-1. **Thermal Stress**: Edge-mounted LED backlights run along the display borders, continuously baking the glue.
-2. **Photo-Oxidation & Outgassing**: Microscopic oxygen permeation along the outer perimeter breaks down the polymer chains in the adhesive, causing it to oxidize and turn amber/yellow.
-3. **Blue Wavelength Absorption**: The degraded glue acts as an unwanted optical yellow filter, absorbing cold blue spectrum light ($430\text{--}480\,\text{nm}$) and letting only yellow/red pass through at the edges.
-
-Apple repair centers only offer costly full-unit or whole-screen replacements, and refurbished or replacement panels frequently develop the exact same chemical oxidation after a few years.
+### Battery and GPU Pipeline Overhaul
+- **CoreAnimation GPU Acceleration**: Eliminated software rasterization (`drawRect:`). Gradients are now executed by the GPU via native fragment shaders with 0% CPU consumption.
+- **Center Display Bypass**: Converted the fullscreen canvas into 4 independent perimeter boundary layers joined by 45-degree miter masks. The central 90% of the display area contains no sublayers, allowing the iPad Pro 120Hz ProMotion display controller to downclock to 24Hz on static content.
+- **Memory Footprint Reduction**: Eliminated dual 2224x1668 32-bit framebuffer allocations, reducing memory usage from approximately 30 MB to under 20 KB.
+- **State Gating**: Layout updates are guarded by geometry and parameter equality checks, eliminating redundant transaction commits.
 
 ---
 
-## 💡 The Solution: How AntiJaundice Works
+## Background: Laminated Panel Edge Degradation
 
-AntiJaundice neutralizes the defect entirely in software through **additive complementary chromatic cancellation**:
+A documented physical aging characteristic in older laminated iPad displays—predominantly the iPad Pro 10.5" (2017), iPad Pro 9.7" (2016), and iPad Air 3rd Gen—is the formation of an amber or brownish border around the screen perimeter.
+
+### Cause of Degradation
+Laminated panels bond the cover glass, digitizer, polarizing filter, and TFT LCD substrate using Liquid Optical Clear Adhesive (LOCA/OCA). Over time:
+1. **Thermal Exposure**: Edge-mounted LED backlights subject the border adhesive to continuous thermal cycling.
+2. **Photo-Oxidation**: Microscopic oxygen diffusion along the bezel perimeter breaks down the polymer matrix, causing discoloration.
+3. **Selective Spectral Absorption**: Degraded adhesive acts as an optical low-pass yellow filter, absorbing blue wavelengths (430 nm to 480 nm) while transmitting yellow and red wavelengths.
+
+---
+
+## Technical Approach: Additive Chromatic Inversion
+
+AntiJaundice cancels the defect at the compositor level through complementary chromatic injection:
 
 ```
-[ Degraded Glue: Absorbs Blue (Looks Yellow) ] + [ AntiJaundice: Injects Cool Tint ] = [ Neutral D65 White ]
+[ Degraded Adhesive: Blue Deficit (Yellow) ] + [ AntiJaundice: Inverted Cool Tint ] = [ Neutral D65 White ]
 ```
 
-1. **Chromatic Inversion**:  
-   By projecting a calibrated, inverse cold-spectrum chromatic vignette (gradient bands along the top, bottom, left, and right edges) at the `SpringBoard` compositor level, the tweak compensates for the missing blue photons. The resulting combined transmission across the borders returns to a crisp, neutral white balance.
-2. **Smooth Non-Linear Falloff**:  
-   The chromatic filter utilizes a smooth cosine/Gaussian gradient curve that gently feathers from the outer bezel inward towards the unaffected center of the screen, ensuring no visible boundary line is perceptible.
-3. **True Contrast & Movie Preservation**:  
-   The filter is rendered additively with low alpha opacity. In dark mode, during movie playback, or on black backgrounds, dark pixels remain deep and uncolored.
+1. **Chromatic Inversion**: A calibrated cold-spectrum gradient is composited along the display perimeter inside the `SpringBoard` render pipeline. Missing blue photons are replenished, restoring D65 white point uniformity.
+2. **Non-Linear Feathering**: Multi-stop gradient distributions feather inward toward the unaffected display center to prevent perceptible transition seams.
+3. **Contrast Preservation**: Low-alpha additive compositing ensures black levels and movie playback remain unaffected.
 
 ---
 
-## ✨ Features
+## Features
 
-- 🎨 **Continuous Spectrum Hue Tuning (`colorHue`: 0 – 100)**:
-  Unlike tweaks with fixed presets, AntiJaundice features continuous spectrum mapping across the complementary cold spectrum:
-  - `0.0`: Cyan / Turquoise ($\approx 173^\circ$) for warm orange/amber edge degradation.
-  - `50.0`: Pure Azure / Sky Blue ($\approx 227^\circ$) for classic yellow border aging.
-  - `100.0`: Deep Violet-Blue ($\approx 281^\circ$) for brownish or greenish perimeter discoloration.
-- 📏 **Band Width Adjustment (`bandWidth`: 50 – 250 px)**:
-  Tune the depth of the edge gradient to match whether your panel has a narrow edge fringe or a deep border discoloration.
-- 📐 **Edge Offset (`edgeOffset`: 0 – 40 px)**:
-  Shift the start of the gradient inward or outward to align perfectly with the physical active display border.
-- 🎚️ **Precision Intensity Control (`intensity`: 0.1% – 20.0%)**:
-  Allows adjustment down to single-tenth percentages (e.g. `7.5%`) to achieve the exact threshold where yellowing cancels out without over-saturating into blue.
-- ⚡ **Real-Time Bidirectional Sync**:
-  Dragging any slider updates the companion text box and the SpringBoard screen overlay live with zero lag. You can also type exact numerical values directly.
-- 📸 **Automatic Screenshot Clean Capture**:
-  Hooks into `SSScreenCapturer`, `SBScreenshotManager`, `SBScreenFlash`, and `SpringBoard` to instantly hide the filter during screenshots and screen recordings. Your captured images remain authentic and defect-free.
-- 👆 **Transparent Touch & Apple Pencil Pass-Through**:
-  Operates on a non-interactive overlay window (`UIWindowLevelStatusBar + 50.0`) implementing `- (BOOL)_ignoresHitTest` and `userInteractionEnabled = NO`. Zero input latency, zero touch interference.
+- **Continuous Hue Control (`colorHue`: 0 to 100)**:
+  - `0.0`: Cyan / Turquoise (~173 deg) for amber and orange degradation.
+  - `50.0`: Pure Azure (~227 deg) for standard yellow perimeter aging.
+  - `100.0`: Violet-Blue (~281 deg) for dark brownish or greenish borders.
+- **Band Width Regulation (`bandWidth`: 50 to 250 px)**: Configures the spatial depth of the compensation gradient to match the affected margin.
+- **Edge Offset Calibration (`edgeOffset`: 0 to 40 px)**: Adjusts the outer onset boundary relative to the physical active display border.
+- **Precision Intensity Scale (`intensity`: 0.1% to 20.0%)**: Single-decimal percentage tuning for precise chromatic neutralization without blue saturation.
+- **Bidirectional Control Synchronization**: Direct real-time synchronization between table cell text fields and slider controls in Settings.
+- **Clean Screenshot Interception**: Intercepts `SSScreenCapturer`, `SBScreenshotManager`, and `SpringBoard` screenshot pipelines to hide the overlay during screen capture, ensuring exported media remains unmodified.
+- **Input Pass-Through**: Overlay window resides at `UIWindowLevelStatusBar + 50.0` with `_ignoresHitTest` enabled and `userInteractionEnabled = NO`, ensuring zero touch or Apple Pencil latency.
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ### Requirements
-- **Device**: Any iPad or iPhone with laminated display edge yellowing (specifically optimized for iPad Pro 10.5" 2017).
-- **Firmware**: iOS 12.0 up to iOS 18+.
-- **Jailbreak**: Dopamine, palera1n, XinaA15, unc0ver, checkra1n, Taurine, etc.
+- **Hardware**: Laminated iPad or iPhone displays exhibiting perimeter discoloration.
+- **Firmware**: iOS/iPadOS 12.0 through 18.x.
+- **Environment**: Rootless jailbreak environments (Dopamine, palera1n rootless) or rootful configurations.
 - **Dependencies**: `preferenceloader`, `mobilesubstrate` (or ElleKit).
 
-### Package Manager (Sileo / Zebra / Filza)
-1. Download the compiled `.deb` package:
-   - **Rootless (Dopamine / palera1n rootless):**  
-     `com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`
-2. Open in **Sileo** / **Zebra** / **Filza** and tap **Install**.
-3. Respring your device.
+### Package Deployment
+1. Download the Debian package:
+   - `com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`
+2. Install via Sileo, Zebra, or Filza.
+3. Perform a userspace reboot or respring.
 
 ---
 
-## 🛠️ Step-by-Step Calibration Walkthrough
+## Calibration Guide
 
-1. Open a pure white background on your iPad (e.g., a blank page in **Safari**, **Notes**, or **Apple Books** in light mode).
-2. Open **Settings ➔ AntiJaundice**.
-3. Switch **Enabled** to `ON`.
-4. Observe the yellow border along the screen edges:
-   - **Band Width**: Adjust the slider until the blue gradient band covers the full width of the yellowing border.
-   - **Edge Offset**: Set the offset so the gradient begins precisely where the yellowing starts along the bezel.
-   - **Intensity**: Slowly raise intensity from `0.1%` up until the yellow tint neutralizes. (Typical sweet spot is between `6.0%` and `12.0%`).
-   - **Color Hue**: If the border looks slightly greenish after adding the filter, slide **Color Hue** higher towards `60–80` (more violet). If it looks too purple, slide lower towards `20–40` (more cyan).
-5. The calibration is stored permanently across resprings and reboots!
+1. Display a uniform white canvas across the screen (for example, a blank document in Safari or Notes).
+2. Navigate to **Settings -> AntiJaundice**.
+3. Toggle **Enabled** to active.
+4. Align the parameters:
+   - **Band Width**: Increase the slider until the gradient fully covers the discolored boundary.
+   - **Edge Offset**: Align the outer onset with the inner edge of the bezel.
+   - **Intensity**: Increase gradually from 0.1% until the yellow cast neutralizes (optimal range is typically between 6.0% and 12.0%).
+   - **Color Hue**: Shift toward violet (60-80) if the compensated edge appears green, or toward cyan (20-40) if the edge appears purple.
+5. Parameters persist across device reboots and resprings.
 
 ---
 
-## 🏗️ Building from Source
+## Compilation and Packaging
 
-To compile the Fat Mach-O dylib and preference bundle for both `arm64` and `arm64e`, and package the Debian archive:
+The automated packaging pipeline compiles fat Mach-O binaries for both `arm64` and `arm64e`, establishes entitlement signing, and generates the Debian package:
 
 ```bash
-# Navigate to the repository directory
 cd AntiJaundice
-
-# Run the python packaging pipeline
 python3 pack_deb.py
 ```
 
-The script:
-1. Compiles `AntiJaundice.dylib` for SpringBoard using Xcode clang with `-arch arm64 -arch arm64e`.
-2. Links and codesigns the dylib via `ldid -S`.
-3. Compiles `AntiJaundice` PreferenceBundle Mach-O linked to `Preferences.tbd`.
-4. Generates multi-resolution Settings icons.
-5. Builds the `.deb` archive via `dpkg-deb -Zgzip --root-owner-group` to `/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`.
+Pipeline tasks:
+1. Compiles `AntiJaundice.dylib` for `SpringBoard` targeting `arm64` and `arm64e`.
+2. Signs the dynamic library using `ldid -S`.
+3. Compiles the `AntiJaundice` PreferenceBundle against the private Preferences SDK.
+4. Generates bundled multi-resolution application icons.
+5. Assembles the Debian archive using `dpkg-deb -Zgzip --root-owner-group` to `com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`.
 
 ---
 
-## 👤 Author
+## Repository Structure
+
+```
+AntiJaundice/
+├── pack_deb.py                     # Build and packaging automation
+├── README.md                       # Technical documentation
+├── AntiJaundice.plist              # PreferenceLoader root specifier configuration
+├── AntiJaundice.m                  # SpringBoard compositor overlay and screenshot hooks
+├── AntiJaundicePrefs.m             # Settings preference bundle implementation
+├── com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb # Pre-compiled rootless package
+└── src/
+    ├── AntiJaundice.m              # Primary source mirror
+    └── AntiJaundicePrefs.m         # Preferences source mirror
+```
+
+---
+
+## Author
 
 - **Developer**: Ronald Nedela ([@RonaldNedela](https://github.com/RonaldNedela))
-- **Compatibility**: iPad Pro 10.5" (2017) • iPad Pro 9.7" • iPad Air 3 • iOS 12.0 – 18+
+- **Target Platform**: iPad Pro 10.5" (2017), iPad Pro 9.7", iPad Air 3, iOS/iPadOS 12.0 - 18+
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - feel free to modify, distribute, and integrate.
+This project is licensed under the MIT License.
