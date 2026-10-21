@@ -137,11 +137,11 @@ bundle_info_plist = """<?xml version="1.0" encoding="UTF-8"?>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>NSPrincipalClass</key>
     <string>AntiJaundiceRootListController</string>
 </dict>
@@ -192,7 +192,7 @@ for d in [pref_bundle_dir, pref_loader_dir]:
 # 8. Control file
 control_content = """Package: com.ronci.antijaundice
 Name: AntiJaundice
-Version: 1.0.0
+Version: 1.0.1
 Architecture: iphoneos-arm64
 Description: Screen edge yellowing compensation filter for iPad.
 Maintainer: Ronci
@@ -278,7 +278,7 @@ with open(postrm_file, "w", encoding="utf-8") as f:
 os.chmod(postrm_file, 0o755)
 
 # 11. Build package using official dpkg-deb with GNU gzip compression and root owner
-deb_output = "/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.0_iphoneos-arm64.deb"
+deb_output = os.path.join(script_dir, "com.ronci.antijaundice_1.0.1_iphoneos-arm64.deb")
 print(f"Building deb package via dpkg-deb to {deb_output}...")
 cmd_deb = [
     "dpkg-deb",
@@ -291,3 +291,6 @@ subprocess.run(cmd_deb, check=True)
 
 print(f"Package successfully created at: {deb_output}")
 print(f"File size: {os.path.getsize(deb_output)} bytes")
+dl_output = "/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.1_iphoneos-arm64.deb"
+shutil.copy2(deb_output, dl_output)
+print(f"Copied deb to Downloads: {dl_output}")

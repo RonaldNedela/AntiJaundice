@@ -85,7 +85,7 @@ AntiJaundice neutralizes the defect entirely in software through **additive comp
 ### Package Manager (Sileo / Zebra / Filza)
 1. Download the compiled `.deb` package:
    - **Rootless (Dopamine / palera1n rootless):**  
-     `com.ronci.antijaundice_1.0.0_iphoneos-arm64.deb`
+     `com.ronci.antijaundice_1.0.1_iphoneos-arm64.deb`
 2. Open in **Sileo** / **Zebra** / **Filza** and tap **Install**.
 3. Respring your device.
 
@@ -122,7 +122,7 @@ The script:
 2. Links and codesigns the dylib via `ldid -S`.
 3. Compiles `AntiJaundice` PreferenceBundle Mach-O linked to `Preferences.tbd`.
 4. Generates multi-resolution Settings icons.
-5. Builds the `.deb` archive via `dpkg-deb -Zgzip --root-owner-group` to `/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.0_iphoneos-arm64.deb`.
+5. Builds the `.deb` archive via `dpkg-deb -Zgzip --root-owner-group` to `/Users/Ronci/Downloads/com.ronci.antijaundice_1.0.1_iphoneos-arm64.deb`.
 
 ---
 
