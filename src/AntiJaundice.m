@@ -44,16 +44,79 @@ static void reloadPreferences(void);
 
 @end
 
+static CGImageRef createTrapezoidGradientImage(CGFloat w, CGFloat h, CGFloat bw, BOOL isHorizontal, CGFloat r, CGFloat g, CGFloat b, const CGFloat *locs, const CGFloat *alphas, size_t stopCount) {
+    size_t pxW = (size_t)ceil(w);
+    size_t pxH = (size_t)ceil(h);
+    if (pxW == 0 || pxH == 0 || stopCount < 2) return NULL;
+    
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) return NULL;
+    
+    CGContextRef ctx = CGBitmapContextCreate(
+        NULL,
+        pxW,
+        pxH,
+        8,
+        0,
+        colorSpace,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little
+    );
+    if (!ctx) {
+        CGColorSpaceRelease(colorSpace);
+        return NULL;
+    }
+    
+    // Flip to top-left UIKit coordinates
+    CGContextTranslateCTM(ctx, 0.0, (CGFloat)pxH);
+    CGContextScaleCTM(ctx, 1.0, -1.0);
+    
+    // Clip to 45-degree mitered trapezoid so adjacent edges never double-blend
+    CGContextBeginPath(ctx);
+    if (isHorizontal) {
+        // Top strip: outer edge at y=0, inner mitered edge at y=bw
+        CGContextMoveToPoint(ctx, 0.0, 0.0);
+        CGContextAddLineToPoint(ctx, w, 0.0);
+        CGContextAddLineToPoint(ctx, w - bw, bw);
+        CGContextAddLineToPoint(ctx, bw, bw);
+    } else {
+        // Left strip: outer edge at x=0, inner mitered edge at x=bw
+        CGContextMoveToPoint(ctx, 0.0, 0.0);
+        CGContextAddLineToPoint(ctx, bw, bw);
+        CGContextAddLineToPoint(ctx, bw, h - bw);
+        CGContextAddLineToPoint(ctx, 0.0, h);
+    }
+    CGContextClosePath(ctx);
+    CGContextClip(ctx);
+    
+    CGFloat components[32]; // up to 8 stops * 4
+    if (stopCount > 8) stopCount = 8;
+    for (size_t i = 0; i < stopCount; i++) {
+        components[i * 4 + 0] = r;
+        components[i * 4 + 1] = g;
+        components[i * 4 + 2] = b;
+        components[i * 4 + 3] = alphas[i];
+    }
+    
+    CGGradientRef gradient = CGGradientCreateWithColorComponents(colorSpace, components, locs, stopCount);
+    if (gradient) {
+        CGPoint startPt = CGPointZero;
+        CGPoint endPt = isHorizontal ? CGPointMake(0.0, bw) : CGPointMake(bw, 0.0);
+        CGContextDrawLinearGradient(ctx, gradient, startPt, endPt, 0);
+        CGGradientRelease(gradient);
+    }
+    
+    CGImageRef image = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(colorSpace);
+    return image;
+}
+
 @interface AntiJaundiceView : UIView {
 @public
-    CAGradientLayer *_topLayer;
-    CAShapeLayer *_topMask;
-    CAGradientLayer *_bottomLayer;
-    CAShapeLayer *_bottomMask;
-    CAGradientLayer *_leftLayer;
-    CAShapeLayer *_leftMask;
-    CAGradientLayer *_rightLayer;
-    CAShapeLayer *_rightMask;
+    CALayer *_topLayer;
+    CALayer *_bottomLayer;
+    CALayer *_leftLayer;
+    CALayer *_rightLayer;
     
     CGSize _lastGeometrySize;
     CGFloat _lastHue;
@@ -96,32 +159,28 @@ static void reloadPreferences(void);
         _lastBandWidth = -1.0;
         _lastFilterEnabled = NO;
         
-        // 1. Top Layer & Mask
-        _topLayer = [CAGradientLayer layer];
-        _topMask = [CAShapeLayer layer];
-        _topLayer.mask = _topMask;
+        // Plain CALayers with pre-rendered CGImage contents (0 offscreen mask passes)
+        _topLayer = [CALayer layer];
+        _topLayer.opaque = NO;
+        _topLayer.contentsScale = 1.0;
         [self.layer addSublayer:_topLayer];
         
-        // 2. Bottom Layer & Mask
-        _bottomLayer = [CAGradientLayer layer];
-        _bottomMask = [CAShapeLayer layer];
-        _bottomLayer.mask = _bottomMask;
+        _bottomLayer = [CALayer layer];
+        _bottomLayer.opaque = NO;
+        _bottomLayer.contentsScale = 1.0;
         [self.layer addSublayer:_bottomLayer];
         
-        // 3. Left Layer & Mask
-        _leftLayer = [CAGradientLayer layer];
-        _leftMask = [CAShapeLayer layer];
-        _leftLayer.mask = _leftMask;
+        _leftLayer = [CALayer layer];
+        _leftLayer.opaque = NO;
+        _leftLayer.contentsScale = 1.0;
         [self.layer addSublayer:_leftLayer];
         
-        // 4. Right Layer & Mask
-        _rightLayer = [CAGradientLayer layer];
-        _rightMask = [CAShapeLayer layer];
-        _rightLayer.mask = _rightMask;
+        _rightLayer = [CALayer layer];
+        _rightLayer.opaque = NO;
+        _rightLayer.contentsScale = 1.0;
         [self.layer addSublayer:_rightLayer];
         
-        [self updateGradientAppearance];
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
     return self;
 }
@@ -129,38 +188,35 @@ static void reloadPreferences(void);
 - (void)setIsFilterEnabled:(BOOL)isFilterEnabled {
     if (_isFilterEnabled != isFilterEnabled) {
         _isFilterEnabled = isFilterEnabled;
-        [self updateGradientAppearance];
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
 }
 
 - (void)setIntensity:(CGFloat)intensity {
     if (fabs(_intensity - intensity) > 0.0001) {
         _intensity = intensity;
-        [self updateGradientAppearance];
+        [self rebuildStripsIfNeeded];
     }
 }
 
 - (void)setEdgeOffset:(CGFloat)edgeOffset {
     if (fabs(_edgeOffset - edgeOffset) > 0.1) {
         _edgeOffset = edgeOffset;
-        [self updateGradientAppearance];
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
 }
 
 - (void)setBandWidth:(CGFloat)bandWidth {
     if (fabs(_bandWidth - bandWidth) > 0.1) {
         _bandWidth = bandWidth;
-        [self updateGradientAppearance];
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
 }
 
 - (void)setColorHue:(CGFloat)colorHue {
     if (fabs(_colorHue - colorHue) > 0.1) {
         _colorHue = colorHue;
-        [self updateGradientAppearance];
+        [self rebuildStripsIfNeeded];
     }
 }
 
@@ -178,7 +234,7 @@ static void reloadPreferences(void);
     BOOL sizeChanged = !CGSizeEqualToSize(self.frame.size, frame.size);
     [super setFrame:frame];
     if (sizeChanged) {
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
 }
 
@@ -186,18 +242,26 @@ static void reloadPreferences(void);
     BOOL sizeChanged = !CGSizeEqualToSize(self.bounds.size, bounds.size);
     [super setBounds:bounds];
     if (sizeChanged) {
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (!CGSizeEqualToSize(_lastGeometrySize, self.bounds.size)) {
-        [self updateGradientGeometry];
+        [self rebuildStripsIfNeeded];
     }
 }
 
 - (void)updateGradientAppearance {
+    [self rebuildStripsIfNeeded];
+}
+
+- (void)updateGradientGeometry {
+    [self rebuildStripsIfNeeded];
+}
+
+- (void)rebuildStripsIfNeeded {
     if (!_isFilterEnabled || _intensity <= 0.005) {
         if (_lastFilterEnabled) {
             _lastFilterEnabled = NO;
@@ -212,20 +276,20 @@ static void reloadPreferences(void);
         return;
     }
     
-    // Check if parameters actually changed to avoid redundant GPU state changes
+    CGRect bounds = self.bounds;
+    CGFloat w = bounds.size.width;
+    CGFloat h = bounds.size.height;
+    if (w <= 0.0 || h <= 0.0) return;
+    
+    // State gate: skip if geometry and all optical parameters are unchanged
     if (_lastFilterEnabled == _isFilterEnabled &&
+        CGSizeEqualToSize(_lastGeometrySize, bounds.size) &&
         fabs(_lastHue - _colorHue) < 0.01 &&
         fabs(_lastAlpha - _intensity) < 0.0001 &&
         fabs(_lastEdgeOffset - _edgeOffset) < 0.01 &&
         fabs(_lastBandWidth - _bandWidth) < 0.01) {
         return;
     }
-    
-    _lastFilterEnabled = _isFilterEnabled;
-    _lastHue = _colorHue;
-    _lastAlpha = _intensity;
-    _lastEdgeOffset = _edgeOffset;
-    _lastBandWidth = _bandWidth;
     
     CGFloat hueVal = _colorHue;
     if (hueVal < 0.0) hueVal = 0.0;
@@ -249,112 +313,6 @@ static void reloadPreferences(void);
     if (bandWidth < 5.0) bandWidth = 5.0;
     
     CGFloat totalWidth = edgeOffset + bandWidth;
-    if (totalWidth <= 0.0) return;
-    CGFloat D = totalWidth;
-    
-    NSMutableArray *colors = [NSMutableArray array];
-    NSMutableArray *locations = [NSMutableArray array];
-    
-    if (edgeOffset >= 1.0) {
-        CGFloat locs[8] = {
-            0.0 / D,
-            (0.70 * edgeOffset) / D,
-            edgeOffset / D,
-            (edgeOffset + 0.15 * bandWidth) / D,
-            (edgeOffset + 0.35 * bandWidth) / D,
-            (edgeOffset + 0.65 * bandWidth) / D,
-            (edgeOffset + 0.85 * bandWidth) / D,
-            1.0
-        };
-        CGFloat alphas[8] = {
-            0.0,
-            0.0,
-            0.05 * alpha,
-            0.55 * alpha,
-            1.00 * alpha,
-            0.50 * alpha,
-            0.15 * alpha,
-            0.0
-        };
-        for (int i = 0; i < 8; i++) {
-            UIColor *c = [UIColor colorWithRed:r green:g blue:b alpha:alphas[i]];
-            [colors addObject:(id)c.CGColor];
-            [locations addObject:@(locs[i])];
-        }
-    } else {
-        CGFloat locs[7] = {
-            0.0 / D,
-            (0.08 * bandWidth) / D,
-            (0.20 * bandWidth) / D,
-            (0.35 * bandWidth) / D,
-            (0.65 * bandWidth) / D,
-            (0.85 * bandWidth) / D,
-            1.0
-        };
-        CGFloat alphas[7] = {
-            0.0,
-            0.30 * alpha,
-            0.70 * alpha,
-            1.00 * alpha,
-            0.50 * alpha,
-            0.15 * alpha,
-            0.0
-        };
-        for (int i = 0; i < 7; i++) {
-            UIColor *c = [UIColor colorWithRed:r green:g blue:b alpha:alphas[i]];
-            [colors addObject:(id)c.CGColor];
-            [locations addObject:@(locs[i])];
-        }
-    }
-    
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    
-    _topLayer.colors = colors;
-    _topLayer.locations = locations;
-    _topLayer.hidden = NO;
-    
-    _bottomLayer.colors = colors;
-    _bottomLayer.locations = locations;
-    _bottomLayer.hidden = NO;
-    
-    _leftLayer.colors = colors;
-    _leftLayer.locations = locations;
-    _leftLayer.hidden = NO;
-    
-    _rightLayer.colors = colors;
-    _rightLayer.locations = locations;
-    _rightLayer.hidden = NO;
-    
-    [CATransaction commit];
-}
-
-- (void)updateGradientGeometry {
-    CGRect bounds = self.bounds;
-    CGFloat w = bounds.size.width;
-    CGFloat h = bounds.size.height;
-    if (w <= 0.0 || h <= 0.0) return;
-    
-    if (!_isFilterEnabled || _intensity <= 0.005) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        _topLayer.hidden = YES;
-        _bottomLayer.hidden = YES;
-        _leftLayer.hidden = YES;
-        _rightLayer.hidden = YES;
-        [CATransaction commit];
-        return;
-    }
-    
-    _lastGeometrySize = bounds.size;
-    
-    CGFloat edgeOffset = _edgeOffset;
-    if (edgeOffset < 0.0) edgeOffset = 0.0;
-    
-    CGFloat bandWidth = _bandWidth;
-    if (bandWidth < 5.0) bandWidth = 5.0;
-    
-    CGFloat totalWidth = edgeOffset + bandWidth;
     CGFloat maxAllowed = MIN(w / 2.0, h / 2.0);
     if (totalWidth > maxAllowed) {
         totalWidth = maxAllowed;
@@ -362,71 +320,104 @@ static void reloadPreferences(void);
     if (totalWidth <= 0.0) return;
     
     CGFloat bw = totalWidth;
+    CGFloat D = edgeOffset + bandWidth;
+    if (D <= 0.0) return;
+    
+    CGFloat locs[8];
+    CGFloat alphas[8];
+    size_t stopCount = 0;
+    
+    if (edgeOffset >= 1.0) {
+        stopCount = 8;
+        locs[0] = 0.0 / D;
+        locs[1] = (0.70 * edgeOffset) / D;
+        locs[2] = edgeOffset / D;
+        locs[3] = (edgeOffset + 0.15 * bandWidth) / D;
+        locs[4] = (edgeOffset + 0.35 * bandWidth) / D;
+        locs[5] = (edgeOffset + 0.65 * bandWidth) / D;
+        locs[6] = (edgeOffset + 0.85 * bandWidth) / D;
+        locs[7] = 1.0;
+        
+        alphas[0] = 0.0;
+        alphas[1] = 0.0;
+        alphas[2] = 0.05 * alpha;
+        alphas[3] = 0.55 * alpha;
+        alphas[4] = 1.00 * alpha;
+        alphas[5] = 0.50 * alpha;
+        alphas[6] = 0.15 * alpha;
+        alphas[7] = 0.0;
+    } else {
+        stopCount = 7;
+        locs[0] = 0.0 / D;
+        locs[1] = (0.08 * bandWidth) / D;
+        locs[2] = (0.20 * bandWidth) / D;
+        locs[3] = (0.35 * bandWidth) / D;
+        locs[4] = (0.65 * bandWidth) / D;
+        locs[5] = (0.85 * bandWidth) / D;
+        locs[6] = 1.0;
+        
+        alphas[0] = 0.0;
+        alphas[1] = 0.30 * alpha;
+        alphas[2] = 0.70 * alpha;
+        alphas[3] = 1.00 * alpha;
+        alphas[4] = 0.50 * alpha;
+        alphas[5] = 0.15 * alpha;
+        alphas[6] = 0.0;
+    }
+    
+    // Render only 2 shared trapezoid strip textures (top/bottom share horizImg, left/right share vertImg)
+    CGImageRef horizImg = createTrapezoidGradientImage(w, bw, bw, YES, r, g, b, locs, alphas, stopCount);
+    CGImageRef vertImg = createTrapezoidGradientImage(bw, h, bw, NO, r, g, b, locs, alphas, stopCount);
+    if (!horizImg || !vertImg) {
+        if (horizImg) CGImageRelease(horizImg);
+        if (vertImg) CGImageRelease(vertImg);
+        return;
+    }
+    
+    _lastFilterEnabled = _isFilterEnabled;
+    _lastGeometrySize = bounds.size;
+    _lastHue = _colorHue;
+    _lastAlpha = _intensity;
+    _lastEdgeOffset = _edgeOffset;
+    _lastBandWidth = _bandWidth;
+    
+    CATransform3D rot180 = CATransform3DMakeRotation(M_PI, 0.0, 0.0, 1.0);
     
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     
-    // 1. Top trapezoid: (0, 0, w, bw)
-    _topLayer.frame = CGRectMake(0, 0, w, bw);
-    _topLayer.startPoint = CGPointMake(0.5, 0.0);
-    _topLayer.endPoint = CGPointMake(0.5, 1.0);
+    // 1. Top strip
+    _topLayer.transform = CATransform3DIdentity;
+    _topLayer.bounds = CGRectMake(0.0, 0.0, w, bw);
+    _topLayer.position = CGPointMake(w / 2.0, bw / 2.0);
+    _topLayer.contents = (__bridge id)horizImg;
     _topLayer.hidden = NO;
     
-    UIBezierPath *topPath = [UIBezierPath bezierPath];
-    [topPath moveToPoint:CGPointMake(0, 0)];
-    [topPath addLineToPoint:CGPointMake(w, 0)];
-    [topPath addLineToPoint:CGPointMake(w - bw, bw)];
-    [topPath addLineToPoint:CGPointMake(bw, bw)];
-    [topPath closePath];
-    _topMask.path = topPath.CGPath;
-    _topMask.frame = _topLayer.bounds;
-    
-    // 2. Bottom trapezoid: (0, h - bw, w, bw)
-    _bottomLayer.frame = CGRectMake(0, h - bw, w, bw);
-    _bottomLayer.startPoint = CGPointMake(0.5, 1.0);
-    _bottomLayer.endPoint = CGPointMake(0.5, 0.0);
+    // 2. Bottom strip (reuses horizImg rotated 180 deg)
+    _bottomLayer.bounds = CGRectMake(0.0, 0.0, w, bw);
+    _bottomLayer.position = CGPointMake(w / 2.0, h - bw / 2.0);
+    _bottomLayer.transform = rot180;
+    _bottomLayer.contents = (__bridge id)horizImg;
     _bottomLayer.hidden = NO;
     
-    UIBezierPath *bottomPath = [UIBezierPath bezierPath];
-    [bottomPath moveToPoint:CGPointMake(0, bw)];
-    [bottomPath addLineToPoint:CGPointMake(w, bw)];
-    [bottomPath addLineToPoint:CGPointMake(w - bw, 0)];
-    [bottomPath addLineToPoint:CGPointMake(bw, 0)];
-    [bottomPath closePath];
-    _bottomMask.path = bottomPath.CGPath;
-    _bottomMask.frame = _bottomLayer.bounds;
-    
-    // 3. Left trapezoid: (0, 0, bw, h)
-    _leftLayer.frame = CGRectMake(0, 0, bw, h);
-    _leftLayer.startPoint = CGPointMake(0.0, 0.5);
-    _leftLayer.endPoint = CGPointMake(1.0, 0.5);
+    // 3. Left strip
+    _leftLayer.transform = CATransform3DIdentity;
+    _leftLayer.bounds = CGRectMake(0.0, 0.0, bw, h);
+    _leftLayer.position = CGPointMake(bw / 2.0, h / 2.0);
+    _leftLayer.contents = (__bridge id)vertImg;
     _leftLayer.hidden = NO;
     
-    UIBezierPath *leftPath = [UIBezierPath bezierPath];
-    [leftPath moveToPoint:CGPointMake(0, 0)];
-    [leftPath addLineToPoint:CGPointMake(bw, bw)];
-    [leftPath addLineToPoint:CGPointMake(bw, h - bw)];
-    [leftPath addLineToPoint:CGPointMake(0, h)];
-    [leftPath closePath];
-    _leftMask.path = leftPath.CGPath;
-    _leftMask.frame = _leftLayer.bounds;
-    
-    // 4. Right trapezoid: (w - bw, 0, bw, h)
-    _rightLayer.frame = CGRectMake(w - bw, 0, bw, h);
-    _rightLayer.startPoint = CGPointMake(1.0, 0.5);
-    _rightLayer.endPoint = CGPointMake(0.0, 0.5);
+    // 4. Right strip (reuses vertImg rotated 180 deg)
+    _rightLayer.bounds = CGRectMake(0.0, 0.0, bw, h);
+    _rightLayer.position = CGPointMake(w - bw / 2.0, h / 2.0);
+    _rightLayer.transform = rot180;
+    _rightLayer.contents = (__bridge id)vertImg;
     _rightLayer.hidden = NO;
     
-    UIBezierPath *rightPath = [UIBezierPath bezierPath];
-    [rightPath moveToPoint:CGPointMake(bw, 0)];
-    [rightPath addLineToPoint:CGPointMake(bw, h)];
-    [rightPath addLineToPoint:CGPointMake(0, h - bw)];
-    [rightPath addLineToPoint:CGPointMake(0, bw)];
-    [rightPath closePath];
-    _rightMask.path = rightPath.CGPath;
-    _rightMask.frame = _rightLayer.bounds;
-    
     [CATransaction commit];
+    
+    CGImageRelease(horizImg);
+    CGImageRelease(vertImg);
 }
 
 @end
@@ -897,7 +888,7 @@ static void setupOverlayIfReady(void) {
 static void onSceneActivated(NSNotification *note) {
     (void)note;
     setupOverlayIfReady();
-    reloadPreferences();
+    updateWindowFrames();
 }
 
 #pragma mark - Objective-C Method Hooking Utility
@@ -1156,14 +1147,12 @@ static void initSpringBoard(void) {
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *note) {
         (void)note;
-        updateWindowFrames();
-    }];
-    
-    [[NSNotificationCenter defaultCenter] addObserverForName:UIWindowDidBecomeVisibleNotification
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:^(NSNotification *note) {
-        (void)note;
+        UIDeviceOrientation devOri = [UIDevice currentDevice].orientation;
+        if (devOri == UIDeviceOrientationFaceUp ||
+            devOri == UIDeviceOrientationFaceDown ||
+            devOri == UIDeviceOrientationUnknown) {
+            return;
+        }
         updateWindowFrames();
     }];
     

@@ -11,6 +11,15 @@
 
 ---
 
+## Release Notes: Version 1.0.3
+
+### Zero Offscreen Render Pass Pipeline
+- **Eliminated 4× `CAShapeLayer` Offscreen Passes**: Replaced the 4 masked `CAGradientLayer` sublayers with 4 plain `CALayer` instances backed by 2 pre-rendered, shared 45-degree mitered trapezoid `CGImage` textures (top/bottom and left/right share their textures via 180-degree GPU `CATransform3D`). This eliminates all 4 per-frame GPU offscreen mask render passes in `backboardd`.
+- **Unified State Gating**: Geometry and optical appearance updates are now gated together, so scene activations and preference checks perform zero work when dimensions and parameters are unchanged.
+- **Observer Cleanup**: Removed the noisy `UIWindowDidBecomeVisibleNotification` observer and filtered out `FaceUp`/`FaceDown` device tilt events.
+
+---
+
 ## Release Notes: Version 1.0.2
 
 ### Regression Analysis and Resolution
@@ -88,7 +97,7 @@ AntiJaundice cancels the defect at the compositor level through complementary ch
 
 ### Package Deployment
 1. Download the Debian package:
-   - `com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`
+   - `com.ronci.antijaundice_1.0.3_iphoneos-arm64.deb`
 2. Install via Sileo, Zebra, or Filza.
 3. Perform a userspace reboot or respring.
 
@@ -122,7 +131,7 @@ Pipeline tasks:
 2. Signs the dynamic library using `ldid -S`.
 3. Compiles the `AntiJaundice` PreferenceBundle against the private Preferences SDK.
 4. Generates bundled multi-resolution application icons.
-5. Assembles the Debian archive using `dpkg-deb -Zgzip --root-owner-group` to `com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb`.
+5. Assembles the Debian archive using `dpkg-deb -Zgzip --root-owner-group` to `com.ronci.antijaundice_1.0.3_iphoneos-arm64.deb`.
 
 ---
 
@@ -135,7 +144,7 @@ AntiJaundice/
 ├── AntiJaundice.plist              # PreferenceLoader root specifier configuration
 ├── AntiJaundice.m                  # SpringBoard compositor overlay and screenshot hooks
 ├── AntiJaundicePrefs.m             # Settings preference bundle implementation
-├── com.ronci.antijaundice_1.0.2_iphoneos-arm64.deb # Pre-compiled rootless package
+├── com.ronci.antijaundice_1.0.3_iphoneos-arm64.deb # Pre-compiled rootless package
 └── src/
     ├── AntiJaundice.m              # Primary source mirror
     └── AntiJaundicePrefs.m         # Preferences source mirror
